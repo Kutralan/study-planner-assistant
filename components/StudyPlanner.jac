@@ -7,7 +7,6 @@ import from .ui.badge { Badge }
 import from .ui.progress { Progress }
 import from .ui.input { Input }
 sv import from ..services.chatService { respond_to_chat }
-sv import from ..services.studyPlanGraph { DailyPlan, generate_daily_study_plan }
 
 # A practical daily plan with transparent demo data and local-only interactions.
 def:pub StudyPlanner() -> JsxElement {
