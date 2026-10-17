@@ -6,6 +6,7 @@ import from .ui.button { Button }
 import from .ui.badge { Badge }
 import from .ui.progress { Progress }
 import from .ui.input { Input }
+import from "pdfjs-dist" { getDocument }
 sv import from ..services.chatService { respond_to_chat }
 
 # A practical daily plan with transparent demo data and local-only interactions.
@@ -28,11 +29,38 @@ def:pub StudyPlanner() -> JsxElement {
     async def handle_upload(e: ChangeEvent) {
         selected_file: any = e.target.files[0];
         if selected_file {
-            if selected_file.type == "text/plain" or selected_file.name.endswith(".txt") or selected_file.name.endswith(".csv") {
+            if selected_file.size > 10485760 {
+                uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": selected_file.type or "Unknown file type", "size": selected_file.size, "course": course_choice, "content": "", "status": "Too large: choose a file under 10 MB"}];
+            } elif selected_file.type == "text/plain" or selected_file.name.endswith(".txt") or selected_file.name.endswith(".csv") {
                 content = await selected_file.text();
-                uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": selected_file.type or "text/plain", "size": selected_file.size, "course": course_choice, "content": content, "status": "Selected; not sent yet"}];
+                uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": selected_file.type or "text/plain", "size": selected_file.size, "course": course_choice, "content": content, "status": "Text ready; not sent yet"}];
+            } elif selected_file.type == "application/pdf" or selected_file.name.endswith(".pdf") {
+                try {
+                    pdf_data = await selected_file.arrayBuffer();
+                    pdf_task = getDocument({"data": pdf_data});
+                    pdf_doc = await pdf_task.promise;
+                    if pdf_doc.numPages > 60 {
+                        uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": "application/pdf", "size": selected_file.size, "course": course_choice, "content": "", "status": "Too many pages: limit is 60 pages"}];
+                    } else {
+                        extracted_text = "";
+                        for page_num in range(1, pdf_doc.numPages + 1) {
+                            page = await pdf_doc.getPage(page_num);
+                            text_content = await page.getTextContent();
+                            for item in text_content.items { item_value: any = item; if item_value.str { extracted_text = extracted_text + str(item_value.str) + " "; } }
+                            extracted_text = extracted_text + "\n";
+                        }
+                        if extracted_text.strip() {
+                            uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": "application/pdf", "size": selected_file.size, "course": course_choice, "content": extracted_text, "status": "PDF text ready; not sent yet"}];
+                        } else {
+                            uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": "application/pdf", "size": selected_file.size, "course": course_choice, "content": "", "status": "No selectable text found; scanned PDFs need OCR"}];
+                        }
+                        await pdf_doc.destroy();
+                    }
+                } except Exception {
+                    uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": "application/pdf", "size": selected_file.size, "course": course_choice, "content": "", "status": "Could not read PDF text; try a text/CSV file"}];
+                }
             } else {
-                uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": selected_file.type or "Unknown file type", "size": selected_file.size, "course": course_choice, "content": "", "status": "Metadata only; file format not readable in chat demo"}];
+                uploaded_files = uploaded_files + [{"name": selected_file.name, "mime": selected_file.type or "Unknown file type", "size": selected_file.size, "course": course_choice, "content": "", "status": "Unsupported here: use PDF, TXT, or CSV"}];
             }
         }
     }
@@ -48,7 +76,7 @@ def:pub StudyPlanner() -> JsxElement {
             message = chat_input.strip();
             file_context = "";
             for file_record in uploaded_files {
-                if file_record["content"] and file_record["status"] == "Selected; not sent yet" {
+                if file_record["content"] and str(file_record["status"]).endswith("not sent yet") {
                     file_context = file_context + "\n\n[Student-selected text file: " + str(file_record["name"]) + "]\n" + str(file_record["content"]);
                 }
             }
@@ -63,7 +91,7 @@ def:pub StudyPlanner() -> JsxElement {
                 chat_history = chat_history + [{"role": "assistant", "text": answer}];
                 updated_files: list[dict] = [];
                 for file_record in uploaded_files {
-                    if file_record["status"] == "Selected; not sent yet" and file_record["content"] { updated_files = updated_files + [{**file_record, "status": "Text shared with assistant for this request"}]; }
+                    if str(file_record["status"]).endswith("not sent yet") and file_record["content"] { updated_files = updated_files + [{**file_record, "status": "Text shared with assistant for this request"}]; }
                     else { updated_files = updated_files + [file_record]; }
                 }
                 uploaded_files = updated_files;
@@ -136,7 +164,7 @@ def:pub StudyPlanner() -> JsxElement {
                             </div>
                         </div>
                         <aside className="flex min-w-0 flex-col gap-5" aria-label="Academic assistant">
-                            <Card className="flex flex-col shadow-sm xl:sticky xl:top-20"><CardHeader className="border-b pb-4"><div className="flex items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><HugeiconsIcon icon={SparklesIcon} strokeWidth={2} className="size-5" /></div><div><CardTitle>Academic assistant</CardTitle><CardDescription className="mt-1">Chat, attach notes, review together</CardDescription></div></div></CardHeader><CardContent className="flex flex-col gap-3 p-4"><p className="text-xs leading-relaxed text-muted-foreground">Gemini replies need GEMINI_API_KEY in JacHammer Settings; restart the preview after adding it. Text file contents are sent only when you press Send. Other file formats aren’t extracted in this demo.</p><div className="flex max-h-72 min-h-32 flex-col gap-3 overflow-y-auto rounded-xl border bg-muted/30 p-3" aria-live="polite">{if len(chat_history) == 0 {<div className="rounded-lg bg-card p-3 text-sm leading-relaxed"><p className="text-xs font-medium">Daymark assistant</p><p className="mt-1">Ask about a course, share lecture notes, or paste venue details. I’ll identify timetable candidates for you to review before treating them as confirmed.</p></div>}}{for (i, turn) in enumerate(chat_history) {<div key={str(i)} className={"max-w-[92%] rounded-lg p-3 text-sm leading-relaxed " + ("self-end bg-primary text-primary-foreground" if turn["role"] == "student" else "self-start bg-card")}>{turn["text"]}</div>}}</div><div className="flex flex-col gap-2 rounded-lg border bg-card p-3"><label htmlFor="chat-file-course" className="text-xs font-medium">Associate attached file with</label><select id="chat-file-course" value={course_choice} onChange={handle_course_choice} className="h-9 rounded-md border border-input bg-background px-3 text-sm"><option value="CS1033">CS1033 · Programming Fundamentals</option><option value="EE1040">EE1040 · Electrical Fundamentals</option><option value="MA1014">MA1014 · Mathematics</option><option value="ME1033">ME1033 · Mechanics</option><option value="CE1023">CE1023 · Fluid Mechanics</option><option value="MT1023">MT1023 · Properties of Materials</option></select><label htmlFor="chat-file" className="text-xs font-medium">Attach lecture notes or venue details</label><input id="chat-file" type="file" accept=".txt,.csv,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg" onChange={handle_upload} className="block w-full cursor-pointer rounded-md border border-input bg-background px-2 py-2 text-xs text-muted-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-primary-foreground" /><p className="text-xs text-muted-foreground">Plain text and CSV can be read locally. The file text remains a draft until you send a chat message. PDF, Office, and image files are metadata-only and need a future configured extractor.</p></div>{if chat_error {<p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{chat_error}</p>}}<label className="sr-only" htmlFor="assistant-question">Message the academic assistant</label><Input id="assistant-question" placeholder="Ask about your courses or notes" value={chat_input} onChange={handle_chat_input} onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { send_chat(); } }} /><div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">No chat history is saved by this demo.</span><Button size="sm" disabled={chat_busy} onClick={send_chat}>{"Sending…" if chat_busy else "Send message"}</Button></div></CardContent></Card>
+                            <Card className="flex flex-col shadow-sm xl:sticky xl:top-20"><CardHeader className="border-b pb-4"><div className="flex items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary"><HugeiconsIcon icon={SparklesIcon} strokeWidth={2} className="size-5" /></div><div><CardTitle>Academic assistant</CardTitle><CardDescription className="mt-1">Chat, attach notes, review together</CardDescription></div></div></CardHeader><CardContent className="flex flex-col gap-3 p-4"><p className="text-xs leading-relaxed text-muted-foreground">Gemini replies need GEMINI_API_KEY in JacHammer Settings; restart the preview after adding it. Text file contents are sent only when you press Send. Other file formats aren’t extracted in this demo.</p><div className="flex max-h-72 min-h-32 flex-col gap-3 overflow-y-auto rounded-xl border bg-muted/30 p-3" aria-live="polite">{if len(chat_history) == 0 {<div className="rounded-lg bg-card p-3 text-sm leading-relaxed"><p className="text-xs font-medium">Daymark assistant</p><p className="mt-1">Ask about a course, share lecture notes, or paste venue details. I’ll identify timetable candidates for you to review before treating them as confirmed.</p></div>}}{for (i, turn) in enumerate(chat_history) {<div key={str(i)} className={"max-w-[92%] rounded-lg p-3 text-sm leading-relaxed " + ("self-end bg-primary text-primary-foreground" if turn["role"] == "student" else "self-start bg-card")}>{turn["text"]}</div>}}</div><div className="flex flex-col gap-2 rounded-lg border bg-card p-3"><label htmlFor="chat-file-course" className="text-xs font-medium">Associate attached file with</label><select id="chat-file-course" value={course_choice} onChange={handle_course_choice} className="h-9 rounded-md border border-input bg-background px-3 text-sm"><option value="CS1033">CS1033 · Programming Fundamentals</option><option value="EE1040">EE1040 · Electrical Fundamentals</option><option value="MA1014">MA1014 · Mathematics</option><option value="ME1033">ME1033 · Mechanics</option><option value="CE1023">CE1023 · Fluid Mechanics</option><option value="MT1023">MT1023 · Properties of Materials</option></select><label htmlFor="chat-file" className="text-xs font-medium">Attach lecture notes or venue details</label><input id="chat-file" type="file" accept=".pdf,.txt,.csv" onChange={handle_upload} className="block w-full cursor-pointer rounded-md border border-input bg-background px-2 py-2 text-xs text-muted-foreground file:mr-3 file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-primary-foreground" /><p className="text-xs text-muted-foreground">PDF, TXT, and CSV up to 10 MB are read locally in this browser; PDF extraction is limited to 60 pages. Scanned PDFs need OCR and DOCX/Office files aren’t supported. Extracted text stays a draft until you send; no file is uploaded to server storage.</p>{for (i, file_record) in enumerate(uploaded_files) {<div key={str(i)} className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2 py-1.5"><span className="min-w-0 break-all text-xs">{file_record["name"]} · {file_record["status"]}</span><button type="button" onClick={lambda { remove_file(i); }} className="shrink-0 rounded border px-2 py-1 text-xs hover:bg-muted">Remove</button></div>}}</div>{if chat_error {<p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{chat_error}</p>}}<label className="sr-only" htmlFor="assistant-question">Message the academic assistant</label><Input id="assistant-question" placeholder="Ask about your courses or notes" value={chat_input} onChange={handle_chat_input} onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { send_chat(); } }} /><div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">No chat history is saved by this demo.</span><Button size="sm" disabled={chat_busy} onClick={send_chat}>{"Sending…" if chat_busy else "Send message"}</Button></div></CardContent></Card>
                             <Card className="shadow-sm"><CardHeader className="pb-3"><CardTitle>Connections</CardTitle><CardDescription>External services are optional</CardDescription></CardHeader><CardContent className="flex flex-col gap-3"><div className="flex items-center justify-between"><span className="text-sm">Drive</span><Badge variant="outline">Not connected</Badge></div><div className="flex items-center justify-between"><span className="text-sm">Email reminders</span><Badge variant="outline">Not connected</Badge></div><div className="flex items-center justify-between"><span className="text-sm">WhatsApp</span><Badge variant="outline">Not connected</Badge></div><p className="text-xs leading-relaxed text-muted-foreground">No files synced or reminders sent. Provider setup and student consent are required.</p></CardContent></Card>
                         </aside>
                     </div>
