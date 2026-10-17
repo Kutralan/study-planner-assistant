@@ -85,6 +85,8 @@ og_description = "A minimal jac-shadcn starter."
 og_site_name = "Blank canvas"
 
 
+[plugins.server]
+
 [scale]
 [scale.microservices]
 enabled = false
