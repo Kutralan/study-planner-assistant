@@ -7,6 +7,7 @@ import from .ui.badge { Badge }
 import from .ui.progress { Progress }
 import from .ui.input { Input }
 sv import from ..services.chatService { respond_to_chat }
+sv import from ..services.studyPlanGraph { DailyPlan, generate_daily_study_plan }
 
 # A practical daily plan with transparent demo data and local-only interactions.
 def:pub StudyPlanner() -> JsxElement {
@@ -23,6 +24,9 @@ def:pub StudyPlanner() -> JsxElement {
     has chat_history: list[dict] = [];
     has chat_busy: bool = False;
     has chat_error: str = "";
+    has daily_plan: list[dict] = [];
+    has plan_busy: bool = False;
+    has plan_capacity_hours: str = "2";
     def handle_course_choice(e: ChangeEvent) { course_choice = e.target.value; }
     def handle_chat_input(e: ChangeEvent) { chat_input = e.target.value; }
     async def handle_upload(e: ChangeEvent) {
@@ -92,6 +96,26 @@ def:pub StudyPlanner() -> JsxElement {
         tasks = next_tasks;
     }
     def handle_assistant(e: ChangeEvent) { assistant_note = e.target.value; }
+    def regenerate_daily_plan(e: MouseEvent) {
+        plan_busy = True;
+        available_minutes = int(plan_capacity_hours) * 60;
+        buffer_minutes = int(available_minutes * 0.2);
+        remaining_minutes = available_minutes - buffer_minutes;
+        planned: list[dict] = [];
+        for task in tasks {
+            if not task["done"] {
+                duration = 30;
+                if task["duration"] == "45 min" { duration = 45; }
+                if task["duration"] == "60 min" { duration = 60; }
+                if duration <= remaining_minutes {
+                    planned = planned + [{**task, "plan_minutes": duration, "reason": "Unfinished task fits your available study window; break buffer is preserved."}];
+                    remaining_minutes = remaining_minutes - duration;
+                }
+            }
+        }
+        daily_plan = planned;
+        plan_busy = False;
+    }
 
     return <div className="min-h-screen bg-muted/40 text-foreground">
         <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
@@ -127,7 +151,7 @@ def:pub StudyPlanner() -> JsxElement {
                                 <Card className="shadow-sm"><CardContent className="flex h-full min-h-44 flex-col justify-between p-5"><div><p className="text-sm font-medium text-muted-foreground">NEXT DEADLINE</p><h2 className="mt-2 text-xl font-semibold">Statistics problem set</h2><p className="mt-1 text-sm text-muted-foreground">STAT 210 · Due Friday, October 24</p></div><div className="mt-4 flex items-end justify-between"><div><p className="text-3xl font-semibold tabular-nums">1 day</p><p className="text-xs text-muted-foreground">Date only; no deadline time provided</p></div><Badge variant="secondary">In progress</Badge></div></CardContent></Card>
                             </div>
                             <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-                                <Card className="shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-4 pb-3"><div><CardTitle>Today’s study plan</CardTitle><CardDescription className="mt-1">A focused plan with space to breathe</CardDescription></div><span className="text-sm font-medium tabular-nums">{str(done_count)}/{str(len(tasks))} done</span></CardHeader><CardContent className="flex flex-col gap-4"><div className="flex items-center gap-3"><Progress value={pct} className="h-2 flex-1" /><span className="text-xs tabular-nums text-muted-foreground">{str(pct)}%</span></div><div className="flex flex-col divide-y">{for (i, task) in enumerate(tasks) {<button key={str(i)} onClick={lambda { toggle_task(i); }} className="group flex items-start gap-3 py-3 text-left"><span className={"mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border " + ("border-primary bg-primary text-primary-foreground" if task["done"] else "border-border bg-background")}>{task["done"] and <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-4" />}</span><span className="min-w-0 flex-1"><span className={"block text-sm font-medium " + ("text-muted-foreground line-through" if task["done"] else "")}>{task["title"]}</span><span className="mt-1 block text-xs text-muted-foreground">{task["course"]}</span></span><span className="whitespace-nowrap text-xs text-muted-foreground">{task["duration"]}</span></button>}}</div><div className="flex gap-2"><Input aria-label="New study task" placeholder="Add a study task" value={task_text} onChange={handle_text} onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { tasks = tasks + [{"title": task_text.strip(), "course": "Personal study task", "duration": "30 min", "done": False}]; task_text = ""; } }} /><Button aria-label="Add study task" size="icon" onClick={handle_add}><HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" /></Button></div></CardContent></Card>
+                                <Card className="shadow-sm"><CardHeader className="flex flex-row items-start justify-between gap-4 pb-3"><div><CardTitle>Today’s study plan</CardTitle><CardDescription className="mt-1">Generated from unfinished tasks with a 20% free-time buffer. Demo tasks are session-local.</CardDescription></div><span className="text-sm font-medium tabular-nums">{str(done_count)}/{str(len(tasks))} done</span></CardHeader><CardContent className="flex flex-col gap-4"><div className="flex flex-wrap items-end gap-2"><label className="flex-1 text-xs text-muted-foreground">Available study hours today<Input type="number" value={plan_capacity_hours} onChange={lambda (e: ChangeEvent) { plan_capacity_hours = e.target.value; }} /></label><Button size="sm" onClick={regenerate_daily_plan} disabled={plan_busy}>{"Planning…" if plan_busy else "Generate today’s plan"}</Button></div>{if len(daily_plan) > 0 {<div className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">Plan order follows your unfinished checklist; completed items are preserved. The remaining 20% is held for breaks and unexpected work.</p>{for (plan_i, plan_task) in enumerate(daily_plan) {<div key={str(plan_i)} className="rounded-md border bg-card p-3"><p className="text-sm font-medium">{plan_task["title"]}</p><p className="text-xs text-muted-foreground">{plan_task["course"]} · {str(plan_task["plan_minutes"])} min</p><p className="mt-1 text-xs">{plan_task["reason"]}</p></div>}}</div>}}<div className="flex items-center gap-3"><Progress value={pct} className="h-2 flex-1" /><span className="text-xs tabular-nums text-muted-foreground">{str(pct)}%</span></div><div className="flex flex-col divide-y">{for (i, task) in enumerate(tasks) {<button key={str(i)} onClick={lambda { toggle_task(i); }} className="group flex items-start gap-3 py-3 text-left"><span className={"mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border " + ("border-primary bg-primary text-primary-foreground" if task["done"] else "border-border bg-background")}>{task["done"] and <HugeiconsIcon icon={CheckmarkCircle02Icon} strokeWidth={2} className="size-4" />}</span><span className="min-w-0 flex-1"><span className={"block text-sm font-medium " + ("text-muted-foreground line-through" if task["done"] else "")}>{task["title"]}</span><span className="mt-1 block text-xs text-muted-foreground">{task["course"]}</span></span><span className="whitespace-nowrap text-xs text-muted-foreground">{task["duration"]}</span></button>}}</div><div className="flex gap-2"><Input aria-label="New study task" placeholder="Add a study task" value={task_text} onChange={handle_text} onKeyDown={lambda (e: KeyboardEvent) { if e.key == "Enter" { tasks = tasks + [{"title": task_text.strip(), "course": "Personal study task", "duration": "30 min", "done": False}]; task_text = ""; } }} /><Button aria-label="Add study task" size="icon" onClick={handle_add}><HugeiconsIcon icon={Add01Icon} strokeWidth={2} className="size-4" /></Button></div></CardContent></Card>
                                 <Card id="timetable" className="shadow-sm"><CardHeader className="pb-3"><CardTitle>Today’s timetable</CardTitle><CardDescription>Local times · venue as provided</CardDescription></CardHeader><CardContent className="flex flex-col gap-0"><div className="flex gap-3 border-l-2 border-primary py-3 pl-4"><div className="w-12 shrink-0 text-xs font-medium tabular-nums">10:30</div><div><p className="text-sm font-medium">Cognitive Psychology</p><p className="mt-1 text-xs text-muted-foreground">Science Hall · Room 214</p><Badge className="mt-2" variant="secondary">Next lecture</Badge></div></div><div className="flex gap-3 border-l-2 border-border py-3 pl-4"><div className="w-12 shrink-0 text-xs font-medium tabular-nums">13:00</div><div><p className="text-sm font-medium">Linear Algebra</p><p className="mt-1 text-xs text-muted-foreground">Mathematics Building · Room 108</p></div></div><div className="flex gap-3 border-l-2 border-border py-3 pl-4"><div className="w-12 shrink-0 text-xs font-medium tabular-nums">15:00</div><div><p className="text-sm font-medium">Independent study</p><p className="mt-1 text-xs text-muted-foreground">Library · Quiet study floor</p></div></div><div className="mt-3 rounded-lg bg-muted/60 p-3"><p className="text-xs font-medium">Route guidance unavailable</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Venue details are shown as entered. No campus map or travel-time service is connected.</p></div></CardContent></Card>
                             </div>
                             <div className="grid gap-5 md:grid-cols-2" id="progress">
