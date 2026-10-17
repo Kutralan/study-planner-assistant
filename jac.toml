@@ -49,7 +49,6 @@ recharts = "3.10.1"
 sonner = "2.0.8"
 vaul = "1.1.2"
 pdfjs-dist = "latest"
-"tesseract.js" = "latest"
 
 [dependencies.npm.dev]
 vite = "^6.4.1"
@@ -84,8 +83,6 @@ og_title = "A blank canvas"
 og_description = "A minimal jac-shadcn starter."
 og_site_name = "Blank canvas"
 
-
-[plugins.server]
 
 [scale]
 [scale.microservices]
