@@ -103,7 +103,7 @@ def:pub add_item(kind: str, title: str, course_code: str, date_value: str, time_
     if kind == "task" {
         if minutes < 5 or minutes > 600 { return False; }
         fresh_task = root ++> StudyTask(title=title.strip(), course_code=course_code.strip(), topic=topic.strip(), action="Study " + topic.strip() if topic.strip() else "Review course notes", minutes=minutes);
-        return True;
+        return len([root -->][?:StudyTask]) > 0;
     }
     if kind == "lecture" or kind == "exam" or kind == "quiz" or kind == "assignment" or kind == "holiday" or kind == "event" {
         fresh_event = root ++> AcademicEvent(title=title.strip(), kind=kind, course_code=course_code.strip(), starts_at=date_value.strip() + ("T" + time_value.strip() if time_value.strip() else ""), date_only=not time_value.strip(), venue=venue.strip(), verified=True);
